@@ -16,35 +16,26 @@ from fastapi.middleware.cors import CORSMiddleware
 from database import get_connection, init_db
 from seed_data import seed_data
 from data_collector import run_full_update
+from update_scheduler import UpdateScheduler, run_full_update_cycle, run_signal_collection, run_llm_analysis
+from config import config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
-scheduler_task = None
-
-
-async def scheduled_weekly_update():
-    while True:
-        await asyncio.sleep(7 * 24 * 3600)
-        logger.info("Starting scheduled weekly update...")
-        try:
-            await run_full_update()
-            logger.info("Scheduled weekly update completed.")
-        except Exception as e:
-            logger.error(f"Scheduled update failed: {e}")
+_scheduler = UpdateScheduler()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     seed_data()
-    global scheduler_task
-    scheduler_task = asyncio.create_task(scheduled_weekly_update())
-    logger.info("App started. Weekly scheduler active.")
+    if not config.anthropic_api_key:
+        logger.warning("ANTHROPIC_API_KEY not set — LLM analysis disabled. News scraping still active.")
+    _scheduler.start()
+    logger.info(f"App started. Scheduler active. LLM enabled: {config.llm_enabled}")
     yield
-    if scheduler_task:
-        scheduler_task.cancel()
+    _scheduler.stop()
 
 
 app = FastAPI(title="中国国家政策投资追踪系统", version="2.0.0", lifespan=lifespan)
@@ -383,12 +374,184 @@ async def trigger_update():
         raise HTTPException(500, str(e))
 
 
+@app.post("/api/update/trigger-signals")
+async def trigger_signals_only():
+    """Trigger signal collection only (no LLM analysis)."""
+    try:
+        asyncio.create_task(run_signal_collection())
+        return {"status": "started", "message": "信号采集已触发，后台运行中"}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/update/trigger-llm")
+async def trigger_llm_update(force_all: bool = False):
+    """Trigger full LLM update cycle (signal collection + LLM analysis + change application)."""
+    if not config.anthropic_api_key:
+        raise HTTPException(400, "ANTHROPIC_API_KEY 未配置。请在 .env 文件中设置后重启服务。")
+    try:
+        asyncio.create_task(run_full_update_cycle(force_all=force_all))
+        return {"status": "started", "message": "LLM 更新已触发，后台运行中", "llm_enabled": config.llm_enabled}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 @app.get("/api/updates")
 async def get_update_history():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM data_updates ORDER BY id DESC LIMIT 20")
     rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+@app.get("/api/reviews/pending")
+async def get_pending_reviews():
+    """List all changes awaiting human review."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT l.*, p.name as policy_name, p.lifecycle_stage, p.execution_intensity,
+               p.execution_effectiveness, p.policy_momentum
+        FROM llm_analysis_log l
+        JOIN policies p ON l.policy_id = p.id
+        WHERE l.status = 'manual_review'
+        ORDER BY l.created_at DESC
+    """)
+    rows = []
+    for r in cursor.fetchall():
+        row = dict(r)
+        try:
+            row["proposed_changes"] = json.loads(row["proposed_changes"] or "{}")
+        except Exception:
+            pass
+        rows.append(row)
+    conn.close()
+    return rows
+
+
+@app.post("/api/reviews/{log_id}/approve")
+async def approve_review(log_id: int):
+    """Human approves a pending change — applies it to the DB."""
+    from change_applier import ChangeApplier
+    applier = ChangeApplier()
+    ok = applier.approve_change(log_id)
+    if not ok:
+        raise HTTPException(404, "未找到待审核记录，或状态不是 manual_review")
+    return {"status": "approved", "log_id": log_id}
+
+
+@app.post("/api/reviews/{log_id}/reject")
+async def reject_review(log_id: int, reason: str = ""):
+    """Human rejects a pending change."""
+    from change_applier import ChangeApplier
+    applier = ChangeApplier()
+    ok = applier.reject_change(log_id, reason)
+    if not ok:
+        raise HTTPException(404, "未找到记录")
+    return {"status": "rejected", "log_id": log_id}
+
+
+@app.get("/api/llm/history")
+async def get_llm_history(
+    policy_id: int = None, status: str = None, limit: int = 50
+):
+    """Paginated LLM analysis audit log."""
+    conn = get_connection()
+    query = """
+        SELECT l.*, p.name as policy_name
+        FROM llm_analysis_log l
+        JOIN policies p ON l.policy_id = p.id
+        WHERE 1=1
+    """
+    params = []
+    if policy_id:
+        query += " AND l.policy_id = ?"
+        params.append(policy_id)
+    if status:
+        query += " AND l.status = ?"
+        params.append(status)
+    query += " ORDER BY l.created_at DESC LIMIT ?"
+    params.append(min(limit, 200))
+    rows = [dict(r) for r in conn.execute(query, params).fetchall()]
+    conn.close()
+    return rows
+
+
+@app.get("/api/llm/costs")
+async def get_llm_costs():
+    """Aggregate token usage and cost from llm_analysis_log."""
+    conn = get_connection()
+    today = dict(conn.execute("""
+        SELECT COALESCE(SUM(cost_usd),0) as cost,
+               COALESCE(SUM(prompt_tokens),0) as input_tokens,
+               COALESCE(SUM(completion_tokens),0) as output_tokens,
+               COUNT(*) as calls
+        FROM llm_analysis_log WHERE created_at > datetime('now', '-1 day')
+    """).fetchone())
+    total = dict(conn.execute("""
+        SELECT COALESCE(SUM(cost_usd),0) as cost,
+               COALESCE(SUM(prompt_tokens),0) as input_tokens,
+               COALESCE(SUM(completion_tokens),0) as output_tokens,
+               COUNT(*) as calls
+        FROM llm_analysis_log
+    """).fetchone())
+    conn.close()
+    return {
+        "today": today,
+        "total": total,
+        "daily_cap_usd": config.max_daily_cost_usd,
+    }
+
+
+@app.get("/api/llm/config")
+async def get_llm_config():
+    """Return current LLM configuration (not the API key)."""
+    return {
+        **config.as_dict(),
+        "llm_active": config.llm_enabled,
+        "api_key_configured": bool(config.anthropic_api_key),
+    }
+
+
+@app.put("/api/llm/config")
+async def update_llm_config(updates: dict):
+    """Update configuration values in update_config table."""
+    allowed = {"auto_apply_threshold", "anthropic_model", "max_policies_per_batch",
+                "scrape_rate_limit_seconds", "update_interval_hours", "max_daily_cost_usd",
+                "llm_enabled", "signal_collection_enabled"}
+    updated = []
+    for key, value in updates.items():
+        if key in allowed:
+            config.set(key, str(value))
+            updated.append(key)
+    return {"updated": updated}
+
+
+@app.get("/api/signals")
+async def get_signals(policy_id: int = None, signal_type: str = None, processed: int = None, limit: int = 50):
+    """Browse collected raw signals."""
+    conn = get_connection()
+    query = """
+        SELECT s.*, p.name as policy_name
+        FROM policy_signals s
+        LEFT JOIN policies p ON s.policy_id = p.id
+        WHERE 1=1
+    """
+    params = []
+    if policy_id:
+        query += " AND s.policy_id = ?"
+        params.append(policy_id)
+    if signal_type:
+        query += " AND s.signal_type = ?"
+        params.append(signal_type)
+    if processed is not None:
+        query += " AND s.is_processed = ?"
+        params.append(processed)
+    query += " ORDER BY s.collected_at DESC LIMIT ?"
+    params.append(min(limit, 500))
+    rows = [dict(r) for r in conn.execute(query, params).fetchall()]
     conn.close()
     return rows
 
