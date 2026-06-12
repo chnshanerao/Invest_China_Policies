@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>中国国家政策投资追踪系统</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div id="app">
+        <header class="header">
+            <div class="header-left">
+                <h1>中国国家政策投资追踪系统</h1>
+                <span class="subtitle">Policy Investment Tracker &middot; 92项政策 &middot; 实时追踪</span>
+            </div>
+            <div class="header-right">
+                <button class="btn btn-primary" onclick="triggerUpdate()">手动更新数据</button>
+            </div>
+        </header>
+
+        <nav class="nav-tabs">
+            <button class="tab active" onclick="switchTab('dashboard')">仪表板</button>
+            <button class="tab" onclick="switchTab('lifecycle')">生命周期</button>
+            <button class="tab" onclick="switchTab('detail')">明细数据</button>
+            <button class="tab" onclick="switchTab('policies')">政策列表</button>
+            <button class="tab" onclick="switchTab('opportunities')">投资机会</button>
+            <button class="tab" onclick="switchTab('news')">政策新闻</button>
+        </nav>
+
+        <!-- ==================== Dashboard ==================== -->
+        <div id="tab-dashboard" class="tab-content active">
+            <div class="stats-grid">
+                <div class="stat-card"><div class="stat-number" id="totalPolicies">-</div><div class="stat-label">追踪政策</div></div>
+                <div class="stat-card"><div class="stat-number" id="totalOpportunities">-</div><div class="stat-label">投资机会</div></div>
+                <div class="stat-card"><div class="stat-number accent-green" id="avgIntensity">-</div><div class="stat-label">平均执行力度</div></div>
+                <div class="stat-card"><div class="stat-number accent-yellow" id="avgEffectiveness">-</div><div class="stat-label">平均执行效果</div></div>
+            </div>
+            <div class="chart-grid">
+                <div class="chart-card"><h3>生命周期阶段分布</h3><div id="lifecycleChart" class="lifecycle-ring"></div></div>
+                <div class="chart-card"><h3>政策动量趋势</h3><div id="momentumChart" class="momentum-bars"></div></div>
+                <div class="chart-card"><h3>风险等级矩阵</h3><div id="riskChart2" class="risk-matrix"></div></div>
+                <div class="chart-card"><h3>政策类别概览</h3><div id="categoryChart2" class="bar-chart"></div></div>
+            </div>
+            <div class="chart-grid">
+                <div class="chart-card full-width"><h3>热门投资行业 TOP 12</h3><div id="sectorChart2" class="sector-bubbles"></div></div>
+            </div>
+        </div>
+
+        <!-- ==================== Lifecycle View ==================== -->
+        <div id="tab-lifecycle" class="tab-content">
+            <div class="lifecycle-header">
+                <h2>政策生命周期全景图</h2>
+                <p class="lifecycle-desc">7阶段模型：规划期 → 启动期 → 扩张期 → 验证期 → 成熟期 → 调整期 → 衰退期</p>
+            </div>
+            <div class="lifecycle-legend" id="lifecycleLegend"></div>
+            <div class="lifecycle-filter-bar">
+                <select id="lcFilterStage" onchange="loadLifecycleView()"><option value="">全部阶段</option></select>
+                <select id="lcFilterMomentum" onchange="loadLifecycleView()">
+                    <option value="">全部动量</option><option value="加速">加速</option><option value="平稳">平稳</option><option value="减速">减速</option>
+                </select>
+                <select id="lcFilterCategory" onchange="loadLifecycleView()"><option value="">全部类别</option></select>
+                <select id="lcSort" onchange="loadLifecycleView()">
+                    <option value="lifecycle">按生命周期排序</option>
+                    <option value="intensity">按执行力度排序</option>
+                    <option value="effectiveness">按执行效果排序</option>
+                    <option value="year">按设立时间排序</option>
+                </select>
+            </div>
+            <div id="lifecycleList" class="lifecycle-grid"></div>
+        </div>
+
+        <!-- ==================== Detail Table ==================== -->
+        <div id="tab-detail" class="tab-content">
+            <div class="detail-page-header">
+                <h2>明细数据与评分依据</h2>
+                <p class="lifecycle-desc">每个政策一行，附数据来源与评分逻辑。无实际数据的字段显示"-"。</p>
+                <button class="btn" onclick="toggleMethodology()" style="margin-top:8px">查看评分方法论</button>
+            </div>
+
+            <div id="methodologyPanel" class="methodology-panel" style="display:none"></div>
+
+            <div class="filter-bar">
+                <select id="dtFilterStage" onchange="loadDetailTable()"><option value="">全部阶段</option></select>
+                <select id="dtFilterMomentum" onchange="loadDetailTable()">
+                    <option value="">全部动量</option><option value="加速">加速</option><option value="平稳">平稳</option><option value="减速">减速</option>
+                </select>
+                <select id="dtFilterCategory" onchange="loadDetailTable()"><option value="">全部类别</option></select>
+                <select id="dtFilterRisk" onchange="loadDetailTable()">
+                    <option value="">全部风险</option><option value="低">低</option><option value="中">中</option><option value="高">高</option>
+                </select>
+                <select id="dtSort" onchange="loadDetailTable()">
+                    <option value="lifecycle">按生命周期</option>
+                    <option value="year">按设立时间</option>
+                    <option value="intensity_desc">力度↓</option>
+                    <option value="intensity_asc">力度↑</option>
+                    <option value="effectiveness_desc">效果↓</option>
+                    <option value="effectiveness_asc">效果↑</option>
+                    <option value="category">按类别</option>
+                </select>
+            </div>
+            <div class="results-count" id="detailCount"></div>
+            <div class="detail-table-wrapper">
+                <table class="detail-table" id="detailTable">
+                    <thead>
+                        <tr>
+                            <th class="sticky-col">政策名称</th>
+                            <th>类别</th>
+                            <th>设立年份</th>
+                            <th>生命周期</th>
+                            <th>动量</th>
+                            <th>力度</th>
+                            <th>效果</th>
+                            <th>风险</th>
+                            <th>GDP(亿)</th>
+                            <th>投资(亿)</th>
+                            <th>投资机会</th>
+                            <th>预计结束</th>
+                            <th>政策文件</th>
+                            <th>力度评分依据</th>
+                            <th>效果评分依据</th>
+                            <th>生命周期评估依据</th>
+                            <th>数据验证</th>
+                        </tr>
+                    </thead>
+                    <tbody id="detailTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ==================== Policies ==================== -->
+        <div id="tab-policies" class="tab-content">
+            <div class="filter-bar">
+                <select id="filterCategory" onchange="loadPolicies()"><option value="">全部类别</option></select>
+                <select id="filterRisk" onchange="loadPolicies()">
+                    <option value="">全部风险</option><option value="低">低风险</option><option value="中">中风险</option><option value="高">高风险</option>
+                </select>
+                <select id="filterStage" onchange="loadPolicies()"><option value="">全部阶段</option></select>
+                <select id="filterMomentum" onchange="loadPolicies()">
+                    <option value="">全部动量</option><option value="加速">加速</option><option value="平稳">平稳</option><option value="减速">减速</option>
+                </select>
+                <input type="text" id="filterSearch" placeholder="搜索政策名称/地区..." oninput="debouncedLoadPolicies()">
+            </div>
+            <div class="results-count" id="policiesCount"></div>
+            <div id="policiesList" class="policies-grid"></div>
+        </div>
+
+        <!-- ==================== Opportunities ==================== -->
+        <div id="tab-opportunities" class="tab-content">
+            <div class="filter-bar">
+                <select id="filterOppRisk" onchange="loadOpportunities()">
+                    <option value="">全部风险</option><option value="低">低风险</option><option value="中">中风险</option><option value="高">高风险</option>
+                </select>
+                <select id="filterHorizon" onchange="loadOpportunities()">
+                    <option value="">全部期限</option><option value="短期">短期</option><option value="中期">中期</option><option value="长期">长期</option>
+                </select>
+                <input type="text" id="filterSector" placeholder="搜索行业..." oninput="debouncedLoadOpps()">
+            </div>
+            <div id="opportunitiesList" class="opportunities-grid"></div>
+        </div>
+
+        <!-- ==================== News ==================== -->
+        <div id="tab-news" class="tab-content">
+            <div class="filter-bar">
+                <select id="filterNewsSentiment" onchange="loadNews()">
+                    <option value="">全部情绪</option><option value="积极">积极</option><option value="中性">中性</option><option value="消极">消极</option>
+                </select>
+            </div>
+            <div id="newsList" class="news-list"></div>
+        </div>
+
+        <!-- ==================== Modal ==================== -->
+        <div id="policyModal" class="modal" style="display:none;">
+            <div class="modal-content">
+                <span class="modal-close" onclick="closeModal()">&times;</span>
+                <div id="policyDetail"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
