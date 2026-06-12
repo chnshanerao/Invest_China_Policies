@@ -126,45 +126,80 @@ function renderBarChart(id, data, lk, vk, max = 10) {
 }
 
 // ==================== Lifecycle View ====================
+const STAGE_EN = {"规划期":"Planning","启动期":"Launch","扩张期":"Expansion","验证期":"Validation","成熟期":"Maturity","调整期":"Adjustment","衰退期":"Decline"};
+
+function renderLcCard(p) {
+    const age = p.established_year ? (new Date().getFullYear() - p.established_year) : 0;
+    return `
+    <div class="lc-card" onclick="showPolicyDetail(${p.id})" style="border-left: 4px solid ${STAGE_COLORS[p.lifecycle_stage]||'#666'}">
+        <div class="lc-card-header">
+            <span class="lc-card-name">${p.name}</span>
+            <span class="lc-card-year">${p.established_year ? p.established_year + "年 · " + age + "年" : ""}</span>
+        </div>
+        <div class="lc-card-tags">
+            ${momentumTag(p.policy_momentum)}
+            ${riskTag(p.risk_level)}
+            <span class="tag tag-category">${p.category_name}</span>
+            ${p.region ? `<span class="tag tag-region">${p.region}</span>` : ""}
+        </div>
+        <div class="lc-card-meters">
+            ${meterHtml("力度", p.execution_intensity||0, 10, intensityColor(p.execution_intensity||0))}
+            ${meterHtml("效果", p.execution_effectiveness||0, 10, effectivenessColor(p.execution_effectiveness||0))}
+        </div>
+        <div class="lc-card-bottom">
+            <span>投资机会 ${p.opportunity_count}</span>
+            ${p.expected_end_year ? `<span>预计${p.expected_end_year}年</span>` : "<span>长期持续</span>"}
+            ${p.total_investment_billion ? `<span>${p.total_investment_billion}亿</span>` : ""}
+        </div>
+    </div>`;
+}
+
 async function loadLifecycleView() {
-    const stage = document.getElementById("lcFilterStage").value;
+    const stageFilter = document.getElementById("lcFilterStage").value;
     const momentum = document.getElementById("lcFilterMomentum").value;
     const cat = document.getElementById("lcFilterCategory").value;
     const sort = document.getElementById("lcSort").value;
 
     let url = `/api/policies?sort_by=${sort}`;
-    if (stage) url += `&lifecycle_stage=${encodeURIComponent(stage)}`;
+    if (stageFilter) url += `&lifecycle_stage=${encodeURIComponent(stageFilter)}`;
     if (momentum) url += `&momentum=${encodeURIComponent(momentum)}`;
     if (cat) url += `&category_id=${cat}`;
 
     try {
         const policies = await api(url);
         const container = document.getElementById("lifecycleList");
-        container.innerHTML = policies.map(p => {
-            const stageColor = STAGE_COLORS[p.lifecycle_stage] || "#666";
-            const age = p.established_year ? (new Date().getFullYear() - p.established_year) : 0;
+
+        const grouped = {};
+        STAGE_ORDER.forEach(s => grouped[s] = []);
+        policies.forEach(p => {
+            const s = p.lifecycle_stage || "未分类";
+            if (!grouped[s]) grouped[s] = [];
+            grouped[s].push(p);
+        });
+
+        const stagesToShow = stageFilter ? [stageFilter] : STAGE_ORDER.filter(s => grouped[s] && grouped[s].length > 0);
+
+        container.innerHTML = stagesToShow.map(stage => {
+            const items = grouped[stage] || [];
+            const color = STAGE_COLORS[stage] || "#666";
+            const avgI = items.length ? (items.reduce((s,p) => s + (p.execution_intensity||0), 0) / items.length).toFixed(1) : 0;
+            const avgE = items.length ? (items.reduce((s,p) => s + (p.execution_effectiveness||0), 0) / items.length).toFixed(1) : 0;
             return `
-            <div class="lc-card" onclick="showPolicyDetail(${p.id})" style="border-left: 4px solid ${stageColor}">
-                <div class="lc-card-header">
-                    <span class="lc-card-name">${p.name}</span>
-                    <span class="lc-card-year">${p.established_year ? p.established_year + "年 · " + age + "年" : ""}</span>
+            <div class="swimlane" style="--lane-color: ${color}">
+                <div class="swimlane-header">
+                    <div class="swimlane-title">
+                        <span class="swimlane-dot" style="background:${color}"></span>
+                        <span class="swimlane-stage">${stage}</span>
+                        <span class="swimlane-en">${STAGE_EN[stage]||""}</span>
+                        <span class="swimlane-count">${items.length} 项</span>
+                    </div>
+                    <div class="swimlane-stats">
+                        <span>avg 力度 <b style="color:${intensityColor(avgI)}">${avgI}</b></span>
+                        <span>avg 效果 <b style="color:${effectivenessColor(avgE)}">${avgE}</b></span>
+                    </div>
                 </div>
-                <div class="lc-card-tags">
-                    ${stageTag(p.lifecycle_stage)}
-                    ${momentumTag(p.policy_momentum)}
-                    ${riskTag(p.risk_level)}
-                    <span class="tag tag-category">${p.category_name}</span>
-                    ${p.region ? `<span class="tag tag-region">${p.region}</span>` : ""}
-                </div>
-                <div class="lc-card-meters">
-                    ${meterHtml("执行力度", p.execution_intensity||0, 10, intensityColor(p.execution_intensity||0))}
-                    ${meterHtml("执行效果", p.execution_effectiveness||0, 10, effectivenessColor(p.execution_effectiveness||0))}
-                </div>
-                ${p.lifecycle_note ? `<div class="lc-card-note">${p.lifecycle_note}</div>` : ""}
-                <div class="lc-card-bottom">
-                    <span>投资机会 ${p.opportunity_count}</span>
-                    ${p.expected_end_year ? `<span>预计结束 ${p.expected_end_year}年</span>` : "<span>长期持续</span>"}
-                    ${p.total_investment_billion ? `<span>投资 ${p.total_investment_billion}亿</span>` : ""}
+                <div class="swimlane-cards">
+                    ${items.map(renderLcCard).join("")}
                 </div>
             </div>`;
         }).join("") || '<div class="empty-state">没有匹配的政策</div>';
