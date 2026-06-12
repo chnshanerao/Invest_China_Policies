@@ -255,9 +255,69 @@ body {
 }
 
 .lifecycle-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.swimlane {
+    background: var(--bg-card);
+    border-radius: 14px;
+    border: 1px solid var(--border-color);
+    overflow: hidden;
+}
+.swimlane-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 20px;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--lane-color) 12%, transparent), transparent 60%);
+    border-bottom: 1px solid var(--border-color);
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.swimlane-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.swimlane-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    box-shadow: 0 0 8px color-mix(in srgb, var(--lane-color) 50%, transparent);
+}
+.swimlane-stage {
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+.swimlane-en {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 400;
+}
+.swimlane-count {
+    font-size: 12px;
+    color: var(--lane-color);
+    background: color-mix(in srgb, var(--lane-color) 15%, transparent);
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-weight: 600;
+}
+.swimlane-stats {
+    display: flex;
+    gap: 16px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+.swimlane-stats b { font-size: 14px; }
+.swimlane-cards {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(460px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
     gap: 12px;
+    padding: 16px;
 }
 
 .lc-card {
@@ -645,7 +705,8 @@ body {
     .header { flex-direction: column; gap: 6px; text-align: center; }
     .stats-grid { grid-template-columns: repeat(2, 1fr); }
     .chart-grid { grid-template-columns: 1fr; }
-    .lifecycle-grid { grid-template-columns: 1fr; }
+    .swimlane-cards { grid-template-columns: 1fr; }
+    .swimlane-header { flex-direction: column; align-items: flex-start; }
     .policies-grid { grid-template-columns: 1fr; }
     .filter-bar { flex-direction: column; }
     .filter-bar input { min-width: auto; }
