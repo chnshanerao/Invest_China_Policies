@@ -18,14 +18,14 @@ async function api(path) {
     return res.json();
 }
 
-const TAB_NAMES = ["dashboard","lifecycle","detail","policies","opportunities","news"];
+const TAB_NAMES = ["dashboard","lifecycle","detail","policies","opportunities","news","settings"];
 function switchTab(tab) {
     document.querySelectorAll(".tab-content").forEach(el => el.classList.remove("active"));
     document.querySelectorAll(".tab").forEach(el => el.classList.remove("active"));
     document.getElementById("tab-" + tab).classList.add("active");
     document.querySelectorAll(".tab")[TAB_NAMES.indexOf(tab)].classList.add("active");
     currentTab = tab;
-    const loaders = { dashboard: loadDashboard, lifecycle: loadLifecycleView, detail: loadDetailTable, policies: loadPolicies, opportunities: loadOpportunities, news: loadNews };
+    const loaders = { dashboard: loadDashboard, lifecycle: loadLifecycleView, detail: loadDetailTable, policies: loadPolicies, opportunities: loadOpportunities, news: loadNews, settings: loadSettings };
     if (loaders[tab]) loaders[tab]();
 }
 
@@ -527,6 +527,165 @@ async function triggerUpdate() {
         await fetch(API + "/api/update/trigger", {method:"POST"});
         alert("更新已在后台启动");
     } catch (e) { alert("更新失败: " + e.message); }
+}
+
+// ==================== Settings ====================
+async function loadSettings() {
+    try {
+        const cfg = await api("/api/llm/config");
+        document.getElementById("apiKeyStatus").innerHTML = cfg.api_key_configured
+            ? '<span style="color:#10b981">&#10003; API Key 已配置</span>'
+            : '<span style="color:#f59e0b">&#9888; 未配置 — 请输入API Key后保存</span>';
+        document.getElementById("settingModel").value = cfg.anthropic_model || "claude-sonnet-4-6";
+        document.getElementById("settingThreshold").value = cfg.auto_apply_threshold || "0.85";
+        if (cfg.api_key_configured) {
+            document.getElementById("settingApiKey").placeholder = "sk-ant-****（已配置，留空则保持不变）";
+        }
+    } catch (e) { console.error("Config load error:", e); }
+
+    loadCostStats();
+    loadUpdateHistory();
+    loadPendingReviews();
+}
+
+async function loadCostStats() {
+    try {
+        const c = await api("/api/llm/costs");
+        document.getElementById("costStats").innerHTML = `
+            <div class="cost-row"><span>今日</span><span>${c.today.calls} 次调用</span><span>${c.today.input_tokens + c.today.output_tokens} tokens</span><span>$${c.today.cost.toFixed(4)}</span></div>
+            <div class="cost-row"><span>累计</span><span>${c.total.calls} 次调用</span><span>${c.total.input_tokens + c.total.output_tokens} tokens</span><span>$${c.total.cost.toFixed(4)}</span></div>
+            <div class="cost-row muted"><span>日费用上限: $${c.daily_cap_usd}</span></div>
+        `;
+    } catch (e) { document.getElementById("costStats").textContent = "加载失败"; }
+}
+
+async function loadUpdateHistory() {
+    try {
+        const rows = await api("/api/updates");
+        document.getElementById("updateHistory").innerHTML = rows.slice(0, 8).map(u => `
+            <div class="history-row">
+                <span class="tag tag-${u.status === 'completed' ? 'momentum-加速' : 'momentum-减速'}">${u.status}</span>
+                <span>${u.update_type}</span>
+                <span>${u.records_updated || 0} 条</span>
+                <span class="muted">${u.started_at || ""}</span>
+            </div>
+        `).join("") || "暂无更新记录";
+    } catch (e) { document.getElementById("updateHistory").textContent = "加载失败"; }
+}
+
+async function loadPendingReviews() {
+    try {
+        const reviews = await api("/api/reviews/pending");
+        document.getElementById("reviewBadge").textContent = reviews.length;
+        if (!reviews.length) {
+            document.getElementById("pendingReviews").innerHTML = "暂无待审核项";
+            return;
+        }
+        document.getElementById("pendingReviews").innerHTML = reviews.map(r => {
+            let changes = typeof r.proposed_changes === "string" ? JSON.parse(r.proposed_changes) : r.proposed_changes;
+            let changeList = [];
+            if (changes.lifecycle_stage_change) changeList.push(`生命周期: ${changes.lifecycle_stage_change.old} → ${changes.lifecycle_stage_change.new}`);
+            if (changes.intensity_update) changeList.push(`力度: ${changes.intensity_update.old} → ${changes.intensity_update.new}`);
+            if (changes.effectiveness_update) changeList.push(`效果: ${changes.effectiveness_update.old} → ${changes.effectiveness_update.new}`);
+            if (changes.momentum_change) changeList.push(`动量: ${changes.momentum_change.old} → ${changes.momentum_change.new}`);
+            return `
+            <div class="review-item">
+                <div class="review-header">
+                    <strong>${r.policy_name}</strong>
+                    <span class="tag tag-category">置信度 ${(r.confidence * 100).toFixed(0)}%</span>
+                </div>
+                <div class="review-changes">${changeList.map(c => `<div>&#8226; ${c}</div>`).join("")}</div>
+                <div class="review-reasoning">${r.reasoning || ""}</div>
+                <div class="review-actions">
+                    <button class="btn btn-sm btn-primary" onclick="approveReview(${r.id})">批准</button>
+                    <button class="btn btn-sm" onclick="rejectReview(${r.id})">拒绝</button>
+                </div>
+            </div>`;
+        }).join("");
+    } catch (e) { document.getElementById("pendingReviews").textContent = "加载失败"; }
+}
+
+async function saveSettings() {
+    const keyInput = document.getElementById("settingApiKey").value.trim();
+    const model = document.getElementById("settingModel").value;
+    const threshold = document.getElementById("settingThreshold").value;
+
+    try {
+        if (keyInput) {
+            const res = await fetch(API + "/api/llm/api-key", {
+                method: "POST", headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({api_key: keyInput})
+            });
+            if (!res.ok) { const e = await res.json(); alert(e.detail || "API Key 设置失败"); return; }
+        }
+        await fetch(API + "/api/llm/config", {
+            method: "PUT", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({anthropic_model: model, auto_apply_threshold: threshold})
+        });
+        document.getElementById("settingApiKey").value = "";
+        alert("设置已保存");
+        loadSettings();
+    } catch (e) { alert("保存失败: " + e.message); }
+}
+
+function toggleKeyVisibility() {
+    const input = document.getElementById("settingApiKey");
+    input.type = input.type === "password" ? "text" : "password";
+}
+
+function showUpdateStatus(msg, type) {
+    const el = document.getElementById("updateStatus");
+    el.style.display = "block";
+    el.className = `update-status update-status-${type}`;
+    el.textContent = msg;
+}
+
+async function triggerSignals() {
+    document.getElementById("btnSignals").disabled = true;
+    showUpdateStatus("信号采集中... 预计需要3-5分钟", "info");
+    try {
+        const res = await fetch(API + "/api/update/trigger-signals", {method: "POST"});
+        const data = await res.json();
+        showUpdateStatus("信号采集已在后台启动", "ok");
+    } catch (e) { showUpdateStatus("触发失败: " + e.message, "error"); }
+    setTimeout(() => { document.getElementById("btnSignals").disabled = false; }, 5000);
+}
+
+async function triggerLlmUpdate() {
+    const cfg = await api("/api/llm/config");
+    if (!cfg.api_key_configured) { alert("请先配置 API Key"); return; }
+    document.getElementById("btnLlm").disabled = true;
+    showUpdateStatus("AI 分析更新中... 正在采集信号 → Claude分析 → 应用变更", "info");
+    try {
+        await fetch(API + "/api/update/trigger-llm", {method: "POST"});
+        showUpdateStatus("LLM 更新已在后台启动，完成后请刷新页面查看结果", "ok");
+    } catch (e) { showUpdateStatus("触发失败: " + e.message, "error"); }
+    setTimeout(() => { document.getElementById("btnLlm").disabled = false; }, 5000);
+}
+
+async function triggerNewsUpdate() {
+    showUpdateStatus("新闻采集中...", "info");
+    try {
+        await fetch(API + "/api/update/trigger", {method: "POST"});
+        showUpdateStatus("新闻采集已在后台启动", "ok");
+    } catch (e) { showUpdateStatus("触发失败: " + e.message, "error"); }
+}
+
+async function approveReview(logId) {
+    if (!confirm("确认批准此变更？将立即应用到数据库。")) return;
+    try {
+        await fetch(API + `/api/reviews/${logId}/approve`, {method: "POST"});
+        loadPendingReviews();
+        loadCostStats();
+    } catch (e) { alert("操作失败"); }
+}
+
+async function rejectReview(logId) {
+    const reason = prompt("拒绝原因（可选）：");
+    try {
+        await fetch(API + `/api/reviews/${logId}/reject?reason=${encodeURIComponent(reason||"")}`, {method: "POST"});
+        loadPendingReviews();
+    } catch (e) { alert("操作失败"); }
 }
 
 // ==================== Init ====================
