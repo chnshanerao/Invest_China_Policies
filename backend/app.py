@@ -187,13 +187,18 @@ async def get_policies(
         query += " AND p.region LIKE ?"
         params.append(f"%{region}%")
 
+    stage_order = """CASE p.lifecycle_stage
+            WHEN '规划期' THEN 1 WHEN '启动期' THEN 2 WHEN '扩张期' THEN 3
+            WHEN '验证期' THEN 4 WHEN '成熟期' THEN 5 WHEN '调整期' THEN 6
+            WHEN '衰退期' THEN 7 ELSE 8 END"""
     sort_map = {
         "category": "pc.sort_order, p.established_year",
         "year": "p.established_year DESC",
         "intensity": "p.execution_intensity DESC",
         "effectiveness": "p.execution_effectiveness DESC",
         "risk": "p.risk_level",
-        "stage": "p.lifecycle_stage",
+        "stage": f"{stage_order}, p.execution_intensity DESC",
+        "lifecycle": f"{stage_order}, p.execution_intensity DESC",
     }
     query += f" ORDER BY {sort_map.get(sort_by, sort_map['category'])}"
 
