@@ -529,6 +529,22 @@ async def update_llm_config(updates: dict):
     return {"updated": updated}
 
 
+@app.post("/api/llm/api-key")
+async def set_api_key(body: dict):
+    """Set the Anthropic API key at runtime (stored in .env and environment)."""
+    key = body.get("api_key", "").strip()
+    if not key:
+        raise HTTPException(400, "api_key is required")
+    if not key.startswith("sk-ant-"):
+        raise HTTPException(400, "Invalid API key format. Should start with sk-ant-")
+    os.environ["ANTHROPIC_API_KEY"] = key
+    env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+    with open(env_path, "w") as f:
+        f.write(f"ANTHROPIC_API_KEY={key}\n")
+    logger.info("API key updated via settings page")
+    return {"status": "ok", "api_key_configured": True}
+
+
 @app.get("/api/signals")
 async def get_signals(policy_id: int = None, signal_type: str = None, processed: int = None, limit: int = 50):
     """Browse collected raw signals."""
