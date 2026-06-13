@@ -25,6 +25,7 @@
             <button class="tab" onclick="switchTab('policies')">政策列表</button>
             <button class="tab" onclick="switchTab('opportunities')">投资机会</button>
             <button class="tab" onclick="switchTab('news')">政策新闻</button>
+            <button class="tab" onclick="switchTab('settings')">设置</button>
         </nav>
 
         <!-- ==================== Dashboard ==================== -->
@@ -166,6 +167,79 @@
                 </select>
             </div>
             <div id="newsList" class="news-list"></div>
+        </div>
+
+        <!-- ==================== Settings ==================== -->
+        <div id="tab-settings" class="tab-content">
+            <div class="settings-page">
+                <h2>系统设置</h2>
+
+                <div class="settings-grid">
+                    <div class="settings-card">
+                        <h3>大模型 API 配置</h3>
+                        <p class="settings-desc">配置 Anthropic API Key 后，系统可使用 Claude 自动分析政策信号并更新评分。</p>
+                        <div class="settings-field">
+                            <label>API Key</label>
+                            <div class="input-group">
+                                <input type="password" id="settingApiKey" placeholder="sk-ant-api03-..." autocomplete="off">
+                                <button class="btn btn-sm" onclick="toggleKeyVisibility()">显示</button>
+                            </div>
+                            <span class="settings-hint" id="apiKeyStatus">检查中...</span>
+                        </div>
+                        <div class="settings-field">
+                            <label>模型</label>
+                            <select id="settingModel">
+                                <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (推荐，性价比高)</option>
+                                <option value="claude-opus-4-6">Claude Opus 4.6 (更强，成本高5x)</option>
+                                <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (最快最便宜)</option>
+                            </select>
+                        </div>
+                        <div class="settings-field">
+                            <label>自动应用置信度阈值</label>
+                            <input type="number" id="settingThreshold" value="0.85" min="0.5" max="1.0" step="0.05">
+                            <span class="settings-hint">LLM分析置信度 >= 此值时自动应用变更，否则待人工审核</span>
+                        </div>
+                        <button class="btn btn-primary" onclick="saveSettings()">保存设置</button>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3>数据更新</h3>
+                        <p class="settings-desc">从gov.cn、统计局、百度新闻等多源采集信号，AI分析后自动更新政策状态。</p>
+                        <div class="settings-actions">
+                            <button class="btn btn-lg" onclick="triggerSignals()" id="btnSignals">
+                                <span class="btn-icon">1</span>
+                                <span>采集信号<br><small>从多源抓取最新政策信号</small></span>
+                            </button>
+                            <button class="btn btn-lg btn-primary" onclick="triggerLlmUpdate()" id="btnLlm">
+                                <span class="btn-icon">2</span>
+                                <span>AI 分析更新<br><small>采集 + Claude分析 + 自动更新</small></span>
+                            </button>
+                            <button class="btn btn-lg" onclick="triggerNewsUpdate()">
+                                <span class="btn-icon">N</span>
+                                <span>仅抓新闻<br><small>传统新闻采集（无需API Key）</small></span>
+                            </button>
+                        </div>
+                        <div id="updateStatus" class="update-status" style="display:none"></div>
+                    </div>
+                </div>
+
+                <div class="settings-grid">
+                    <div class="settings-card">
+                        <h3>费用统计</h3>
+                        <div id="costStats" class="cost-stats">加载中...</div>
+                    </div>
+                    <div class="settings-card">
+                        <h3>更新历史</h3>
+                        <div id="updateHistory" class="update-history">加载中...</div>
+                    </div>
+                </div>
+
+                <div class="settings-card full-width">
+                    <h3>待审核变更 <span class="badge" id="reviewBadge">0</span></h3>
+                    <p class="settings-desc">LLM置信度在0.5-0.85之间的提议变更，需要人工确认后才会生效。</p>
+                    <div id="pendingReviews" class="review-list">暂无待审核项</div>
+                </div>
+            </div>
         </div>
 
         <!-- ==================== Modal ==================== -->
